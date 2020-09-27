@@ -1,74 +1,104 @@
 package authentication
 
 import (
-	"database/sql"
+	"net/http"
 
-	"github.com/TaKeO90/pwm/sqlite"
+	"github.com/TaKeO90/pwm/psql"
 )
 
-// DB const variable indicates the path of the sqlite3 file
-const DB string = "./server/database.db"
-
-// Register Saves New Users into Sqlite DB
-func Register(username string, password string, email string) bool {
-	db, err := sql.Open("sqlite3", DB)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	var ok bool
-	reg := sqlite.Register(username, password, email, db)
-	if reg == 0 {
-		ok = true
-	} else {
-		ok = false
-	}
-	return ok
+// Login interface implement the StartUserSession method of UserLogin.
+type Login interface {
+	StartUserSession() (bool, error)
 }
 
-// Login Checks if the username and password entered are the same as others in the DB
-func Login(username string, password string) bool {
-	db, err := sql.Open("sqlite3", DB)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	var ok bool
-	reg := sqlite.Login(username, password, db)
-	if reg {
-		ok = true
-	} else {
-		ok = false
-	}
-	return ok
+// UserLogin structure has Element that we need to check if the user
+// is registred and the password and username he provide are the identical
+type UserLogin struct {
+	username string
+	password string
+	w        http.ResponseWriter
 }
 
-//CheckMail check if mail is already exist in our db
-func CheckMail(email string) bool {
-	db, err := sql.Open("sqlite3", DB)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-	var ok bool
-	exist := sqlite.CheckForMail(email, db)
-	if exist {
-		ok = true
-	} else {
-		ok = false
-	}
-	return ok
+// Register interface implement UserRegister.
+type Register interface {
+	CreateNewUser() (bool, error)
 }
 
-//UpdatePassword update user password
-func UpdatePassword(email, password string) bool {
-	db, err := sql.Open("sqlite3", DB)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-	isUpdated := sqlite.UpdatePw(password, email, db)
-	return isUpdated
+// UserRegister structure has element that we need to register a user.
+type UserRegister struct {
+	username string
+	password string
+	email    string
 }
+
+// NewLogin function returns the interface Login
+func NewLogin(username, password string, w http.ResponseWriter) Login {
+	var login Login
+	ul := &UserLogin{username, password, w}
+	login = ul
+	return login
+}
+
+// StartUserSession UserLogin's method check for username and password
+// in the Database and if they exist we set the cookie token and also
+// we store it into the Db.
+func (l *UserLogin) StartUserSession() (bool, error) {
+	if l.username != "" && l.password != "" {
+		pq, err := psql.NewDb()
+		if err != nil {
+			return false, err
+		}
+		ok, err := pq.GetUsers(l.username, l.password)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			s := NewSession()
+			err = s.setSession(l.username, l.w)
+			if err != nil {
+				return false, err
+			}
+			//need to set & store the token.
+			isStored, err := pq.StoreSessionToken(l.username, s.cookieToken)
+			if err != nil {
+				return false, err
+			}
+			if isStored {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// NewRegister return Register interface.
+func NewRegister(username, password, email string) Register {
+	var register Register
+	uR := &UserRegister{username, password, email}
+	register = uR
+	return register
+}
+
+// CreateNewUser register new User
+func (r *UserRegister) CreateNewUser() (bool, error) {
+	pq, err := psql.NewDb()
+	if err != nil {
+		return false, err
+	}
+	ok, err := pq.StoreUsers(r.username, r.password, r.email)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+////UpdatePassword update user password
+//func UpdatePassword(email, password string) bool {
+//	db, err := sql.Open("sqlite3", DB)
+//	if err != nil {
+//		panic(err)
+//	}
+//	defer db.Close()
+//	isUpdated := sqlite.UpdatePw(password, email, db)
+//	return isUpdated
+//}

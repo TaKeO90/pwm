@@ -4,21 +4,22 @@ package dialer
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
+	//"math/rand"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
+	//"time"
 
 	"github.com/TaKeO90/pwm/authentication"
 	"github.com/TaKeO90/pwm/identityprovider"
-	"github.com/TaKeO90/pwm/services/emailsender"
+	//"github.com/TaKeO90/pwm/services/emailsender"
 	"github.com/TaKeO90/pwm/services/genpassw"
-	"github.com/TaKeO90/pwm/services/pwcompare"
+	//"github.com/TaKeO90/pwm/services/pwcompare"
 	"github.com/TaKeO90/pwm/services/pwsaver"
 	"github.com/TaKeO90/pwm/services/pwshow"
 	"github.com/TaKeO90/pwm/services/readcredfile"
@@ -30,9 +31,13 @@ type User struct {
 	CredList pwshow.UserList `json:"CredList"`
 }
 
+type InternalServerError struct {
+	Error string `json:"error"`
+}
+
 // CookieUser struct holds username of the current user in the session
 type CookieUser struct {
-	Username string `json:Username`
+	Username string `json:"Username"`
 }
 
 //UserData User's data or Credential
@@ -60,6 +65,19 @@ type Creds struct {
 //Login login struct holds values that we need in the frontend to check if we have successfully logged in
 type Login struct {
 	IsLog bool `json:"IsLog"`
+}
+
+// LoginReq
+type LoginReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// RegisReq
+type RegisReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Email    string `json:"email"`
 }
 
 //Logout holds a bool value to indicate which the user is logged out or not
@@ -115,7 +133,7 @@ func handleFilePost(r *http.Request) (multipart.File, *multipart.FileHeader, err
 func UploadCredFile(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
 	u := &FileUploaded{}
-	user := authentication.GetUsername(r)
+	user := authentication.NewSession().GetUsername(r)
 	file, handler, err := handleFilePost(r)
 	defer file.Close()
 	CheckError(err)
@@ -177,17 +195,28 @@ func CheckError(err error) {
 // ServeRegister Serve Registration
 func ServeRegister(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
-	if f := HandlePost(r); len(f) != 0 {
-		user := strings.Join(f["user"], "")
-		password := strings.Join(f["passw"], "")
-		email := strings.Join(f["email"], "")
-		regtr := &Register{}
-		if ok := identityprovider.GetRegister(r, user, password, email); ok {
-			regtr.IsReg = true
-			json.NewEncoder(w).Encode(regtr)
+	if r.Method == "POST" {
+		rData := new(RegisReq)
+		err := json.NewDecoder(r.Body).Decode(rData)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{fmt.Sprintf("Cannot parse JSON data %s", err.Error())})
+		}
+		register := authentication.NewRegister(rData.Username, rData.Password, rData.Email)
+		ok, err := register.CreateNewUser()
+		if err != nil && err.Error() != "username or email already exist" {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{fmt.Sprintf("Something Went Wrong %s", err.Error())})
+		} else if err != nil && err.Error() == "username or email already exist" {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(&Register{false})
+		}
+		if ok {
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(&Register{true})
 		} else {
-			regtr.IsReg = false
-			json.NewEncoder(w).Encode(regtr)
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(&Register{false})
 		}
 	}
 }
@@ -195,19 +224,24 @@ func ServeRegister(w http.ResponseWriter, r *http.Request) {
 // ServeLogin handle login process
 func ServeLogin(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
-	if f := HandlePost(r); len(f) != 0 {
-		user := strings.Join(f["user"], "")
-		password := strings.Join(f["passw"], "")
-		logg := &Login{}
-		if ok, err := identityprovider.GetLoggedin(w, r, user, password); ok {
-			if err != nil {
-				log.Fatal(err)
-			}
-			logg.IsLog = true
-			json.NewEncoder(w).Encode(logg)
+	if r.Body != nil {
+		loginElemnt := new(LoginReq)
+		err := json.NewDecoder(r.Body).Decode(loginElemnt)
+		if err != nil {
+			log.Fatal(err)
+		}
+		login := authentication.NewLogin(loginElemnt.Username, loginElemnt.Password, w)
+		ok, err := login.StartUserSession()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{fmt.Sprintf("Something Went Wrong %s", err.Error())})
+		}
+		if ok {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(&Login{true})
 		} else {
-			logg.IsLog = false
-			json.NewEncoder(w).Encode(logg)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(&Login{false})
 		}
 	}
 }
@@ -215,7 +249,7 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 //CookieDecode decode the cookie and get the username
 func CookieDecode(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
-	uname := authentication.GetUsername(r)
+	uname := authentication.NewSession().GetUsername(r)
 	c := &CookieUser{uname}
 	json.NewEncoder(w).Encode(c)
 }
@@ -237,7 +271,7 @@ func GetLogout(w http.ResponseWriter, r *http.Request) {
 func ServeShow(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
 	var l pwshow.UserList
-	user := authentication.GetUsername(r)
+	user := authentication.NewSession().GetUsername(r)
 	if f := HandlePost(r); len(f) != 0 && user != "" {
 		category := strings.Join(f["category"], "")
 		l = pwshow.ShowCreds(user, category)
@@ -255,53 +289,53 @@ func ServeShow(w http.ResponseWriter, r *http.Request) {
 var t Token
 
 //ServepwForget function that handles password recovery process
-func ServepwForget(w http.ResponseWriter, r *http.Request) {
-	handleOption(w, r)
-	e := &Email{}
-	if f := HandlePost(r); len(f) != 0 {
-		password := strings.Join(f["npassword"], "")
-		if email := strings.Join(f["email"], ""); email != "" && password == "" {
-			if mailExist := authentication.CheckMail(email); mailExist {
-				rand.Seed(time.Now().UnixNano())
-				gencode := rand.Perm(6)
-				var c string
-				// Convert []int into string
-				for _, n := range gencode {
-					c += strconv.Itoa(n)
-				}
-				if sent, err := emailsender.SendCode(c, email); err != nil {
-					log.Fatal(err)
-				} else if sent {
-					t.Code = c
-					e.Response = true
-					json.NewEncoder(w).Encode(e)
-				}
-			} else {
-				t.Code = ""
-				e.Response = false
-				json.NewEncoder(w).Encode(e)
-			}
-		} else if code := strings.Join(f["code"], ""); code != "" {
-			if code == t.Code {
-				e.IsEqual = true
-				json.NewEncoder(w).Encode(e)
-			} else {
-				e.IsEqual = false
-				json.NewEncoder(w).Encode(e)
-			}
-		} else if password != "" && email != "" {
-			p := &Password{}
-			isUpdated := authentication.UpdatePassword(email, password)
-			if isUpdated {
-				p.Updated = isUpdated
-				json.NewEncoder(w).Encode(p)
-			} else {
-				p.Updated = false
-				json.NewEncoder(w).Encode(p)
-			}
-		}
-	}
-}
+//func ServepwForget(w http.ResponseWriter, r *http.Request) {
+//	handleOption(w, r)
+//	e := &Email{}
+//	if f := HandlePost(r); len(f) != 0 {
+//		password := strings.Join(f["npassword"], "")
+//		if email := strings.Join(f["email"], ""); email != "" && password == "" {
+//			if mailExist := authentication.CheckMail(email); mailExist {
+//				rand.Seed(time.Now().UnixNano())
+//				gencode := rand.Perm(6)
+//				var c string
+//				// Convert []int into string
+//				for _, n := range gencode {
+//					c += strconv.Itoa(n)
+//				}
+//				if sent, err := emailsender.SendCode(c, email); err != nil {
+//					log.Fatal(err)
+//				} else if sent {
+//					t.Code = c
+//					e.Response = true
+//					json.NewEncoder(w).Encode(e)
+//				}
+//			} else {
+//				t.Code = ""
+//				e.Response = false
+//				json.NewEncoder(w).Encode(e)
+//			}
+//		} else if code := strings.Join(f["code"], ""); code != "" {
+//			if code == t.Code {
+//				e.IsEqual = true
+//				json.NewEncoder(w).Encode(e)
+//			} else {
+//				e.IsEqual = false
+//				json.NewEncoder(w).Encode(e)
+//			}
+//		} else if password != "" && email != "" {
+//			p := &Password{}
+//			isUpdated := authentication.UpdatePassword(email, password)
+//			if isUpdated {
+//				p.Updated = isUpdated
+//				json.NewEncoder(w).Encode(p)
+//			} else {
+//				p.Updated = false
+//				json.NewEncoder(w).Encode(p)
+//			}
+//		}
+//	}
+//}
 
 var d UserData //pwshow.UserList
 
@@ -315,26 +349,26 @@ func handleJSONBody(r *http.Request) error {
 
 //TODO: not sure 100% need test
 //ServeCreds update and delete User creds if the front-end credential has been changed
-func ServeCreds(w http.ResponseWriter, r *http.Request) {
-	handleOption(w, r)
-	username := authentication.GetUsername(r)
-	err := handleJSONBody(r)
-	CheckError(err)
-	if username != "" && d.Credential != nil {
-		index := pwcompare.Compare(pwshow.FinalList, d.Credential)
-		if ok := pwcompare.DiffAnalyse(username, d.Category, pwshow.FinalList, d.Credential, index); ok {
-			c := &Creds{Updated: true}
-			json.NewEncoder(w).Encode(c)
-		} else {
-			c := &Creds{Updated: false}
-			json.NewEncoder(w).Encode(c)
-		}
-
-	} else {
-		c := &Creds{Updated: false}
-		json.NewEncoder(w).Encode(c)
-	}
-}
+//func ServeCreds(w http.ResponseWriter, r *http.Request) {
+//	handleOption(w, r)
+//	username := authentication.GetUsername(r)
+//	err := handleJSONBody(r)
+//	CheckError(err)
+//	if username != "" && d.Credential != nil {
+//		index := pwcompare.Compare(pwshow.FinalList, d.Credential)
+//		if ok := pwcompare.DiffAnalyse(username, d.Category, pwshow.FinalList, d.Credential, index); ok {
+//			c := &Creds{Updated: true}
+//			json.NewEncoder(w).Encode(c)
+//		} else {
+//			c := &Creds{Updated: false}
+//			json.NewEncoder(w).Encode(c)
+//		}
+//
+//	} else {
+//		c := &Creds{Updated: false}
+//		json.NewEncoder(w).Encode(c)
+//	}
+//}
 
 func ServeGenPw(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)

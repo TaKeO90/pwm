@@ -1,17 +1,23 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/TaKeO90/pwm/psql"
 	"github.com/TaKeO90/pwm/server/handler"
 	"github.com/go-chi/chi"
 )
 
 func main() {
+	if err := psql.IstablishAndCreateDB(); err != nil {
+		log.Fatal(err)
+	}
+	pql, err := psql.NewDb()
+	if err := pql.CreateTables(); err != nil {
+		log.Fatal(err)
+	}
 	r := chi.NewRouter()
-	//r.Get("/", handler.ReqHandler)
 	r.Options("/user", handler.ReqHandler)
 	r.Get("/user", handler.ReqHandler)
 	r.Post("/register", handler.ReqHandler)
@@ -30,8 +36,7 @@ func main() {
 	r.Post("/upload", handler.ReqHandler)
 	r.Options("/genpw", handler.ReqHandler)
 	r.Post("/genpw", handler.ReqHandler)
-	fmt.Println("Running Server on 127.0.0.1:8080")
-	err := (http.ListenAndServe(":8080", r))
+	err = (http.ListenAndServe(":8080", r))
 	if err != nil {
 		log.Fatal(err)
 	}
