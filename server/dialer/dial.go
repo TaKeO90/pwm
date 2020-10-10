@@ -16,7 +16,7 @@ import (
 	//"time"
 
 	"github.com/TaKeO90/pwm/authentication"
-	"github.com/TaKeO90/pwm/identityprovider"
+	//"github.com/TaKeO90/pwm/identityprovider"
 	//"github.com/TaKeO90/pwm/services/emailsender"
 	"github.com/TaKeO90/pwm/services/genpassw"
 	//"github.com/TaKeO90/pwm/services/pwcompare"
@@ -78,6 +78,11 @@ type RegisReq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Email    string `json:"email"`
+}
+
+// LogoutReq
+type LogoutReq struct {
+	Username string `json:"username"`
 }
 
 //Logout holds a bool value to indicate which the user is logged out or not
@@ -232,7 +237,10 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		login := authentication.NewLogin(loginElemnt.Username, loginElemnt.Password, w)
 		ok, err := login.StartUserSession()
-		if err != nil {
+		if err != nil && err.Error() == "Session Already Exist" {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(&Login{false})
+		} else if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(&InternalServerError{fmt.Sprintf("Something Went Wrong %s", err.Error())})
 		}
@@ -257,14 +265,31 @@ func CookieDecode(w http.ResponseWriter, r *http.Request) {
 //GetLogout logout the user by clearing the cookie value
 func GetLogout(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
-	logout := &Logout{}
-	if ok := identityprovider.GetLoggedout(w, r); ok {
-		logout.IsLogout = ok
-		json.NewEncoder(w).Encode(logout)
-	} else {
-		logout.IsLogout = ok
-		json.NewEncoder(w).Encode(logout)
+	if r.Body != nil {
+		logoutData := new(LogoutReq)
+		err := json.NewDecoder(r.Body).Decode(logoutData)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{"Cannot Get Logout Data"})
+		}
+		nLogout := authentication.NewLogout(logoutData.Username, w)
+		ok, err := nLogout.StopUser()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{"Cannot log out the user"})
+		}
+		if ok {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(&Logout{true})
+		}
 	}
+	//	if ok := identityprovider.GetLoggedout(w, r); ok {
+	//		logout.IsLogout = ok
+	//		json.NewEncoder(w).Encode(logout)
+	//	} else {
+	//		logout.IsLogout = ok
+	//		json.NewEncoder(w).Encode(logout)
+	//	}
 }
 
 // ServeShow Show User credentials

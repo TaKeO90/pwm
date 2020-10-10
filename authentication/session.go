@@ -70,7 +70,7 @@ func (s *session) GetUsername(r *http.Request) (username string) {
 }
 
 // ClearSession function Clears the cookie by  modifying the cookie's MaxAge
-func ClearSession(w http.ResponseWriter) {
+func clearSession(w http.ResponseWriter) {
 	cookie := &http.Cookie{
 		Name:   sessionCookie,
 		Value:  "",

@@ -1,12 +1,16 @@
 package identityprovider
 
-import (
-	"net/http"
+func empty() {
+}
 
-	"github.com/TaKeO90/pwm/authentication"
-	//"github.com/TaKeO90/pwm/services/pwencrypter"
-	//"github.com/TaKeO90/pwm/services/serverenc"
-)
+//
+//import (
+//	"net/http"
+//
+//	"github.com/TaKeO90/pwm/authentication"
+//	//"github.com/TaKeO90/pwm/services/pwencrypter"
+//	//"github.com/TaKeO90/pwm/services/serverenc"
+//)
 
 //// GetLoggedin Login the User & give him an identity (Cookie)
 //func GetLoggedin(w http.ResponseWriter, r *http.Request, user string, password string) (bool, error) {
@@ -50,13 +54,13 @@ import (
 
 // GetLoggedout Logout the User and clear session cookie
 // returns true if the process went good otherwise it returns false
-func GetLoggedout(w http.ResponseWriter, r *http.Request) bool {
-	var rr bool
-	if ok := authentication.CheckCookie(r); ok {
-		authentication.ClearSession(w)
-		rr = true
-	} else {
-		rr = false
-	}
-	return rr
-}
+//func GetLoggedout(w http.ResponseWriter, r *http.Request) bool {
+//	var rr bool
+//	if ok := authentication.CheckCookie(r); ok {
+//		authentication.ClearSession(w)
+//		rr = true
+//	} else {
+//		rr = false
+//	}
+//	return rr
+//}

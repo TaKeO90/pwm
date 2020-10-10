@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/TaKeO90/pwm/services/pwhasher"
-	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 //TODO: logout we need to remove the session_token from the db.
@@ -29,54 +29,6 @@ type Psql struct {
 	mtx *sync.Mutex
 }
 
-func createDBs(db *sql.DB) error {
-	isTestdbExist, err := isExistDatabase(db, testDB)
-	if err != nil {
-		return err
-	}
-	isPwmdbExist, err := isExistDatabase(db, prodDB)
-	if err != nil {
-		return err
-	}
-	if !isTestdbExist {
-		script := fmt.Sprintf("CREATE DATABASE %s", testDB)
-		if _, err := db.Exec(script); err != nil {
-			return err
-		}
-	}
-	if !isPwmdbExist {
-		script2 := fmt.Sprintf("CREATE DATABASE %s", prodDB)
-		if _, err := db.Exec(script2); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func isExistDatabase(db *sql.DB, dbname string) (bool, error) {
-	var dbName string
-	if err := db.QueryRow("SELECT datname FROM pg_database WHERE datname = $1", dbname).Scan(&dbName); err != nil {
-		return false, err
-	}
-	if dbName != "" {
-		return true, nil
-	}
-	return false, nil
-}
-
-func IstablishAndCreateDB() error {
-	connStr := fmt.Sprintf("postgresql://localhost/postgres?user=%s&password=%s&sslmode=disable", dbUser, dbPassword)
-	db, err := sql.Open("postgres", connStr)
-	defer db.Close()
-	if err != nil {
-		return err
-	}
-	if err := createDBs(db); err != nil {
-		return err
-	}
-	return nil
-}
-
 // NewDb initialize the connection to the database and returns pointer to Psql or error if anything goes wrong.
 func NewDb() (*Psql, error) {
 	psql := new(Psql)
@@ -96,10 +48,61 @@ func NewDb() (*Psql, error) {
 	return psql, nil
 }
 
+func createDBs(db *sql.DB) error {
+	isTestdbExist, err := isExistDatabase(db, testDB)
+	if err != nil {
+		return fmt.Errorf("Cannot check if testdb exists or not")
+	}
+	isPwmdbExist, err := isExistDatabase(db, prodDB)
+	if err != nil {
+		return fmt.Errorf("Cannot check if prodDb exists or not")
+	}
+	if !isTestdbExist {
+		script := fmt.Sprintf("CREATE DATABASE %s", testDB)
+		if _, err := db.Exec(script); err != nil {
+			return err
+		}
+	}
+	if !isPwmdbExist {
+		script2 := fmt.Sprintf("CREATE DATABASE %s", prodDB)
+		if _, err := db.Exec(script2); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isExistDatabase(db *sql.DB, dbname string) (bool, error) {
+	var dbNumber int
+	if err := db.QueryRow("SELECT COUNT(datname) FROM pg_database WHERE datname = $1",
+		dbname).Scan(&dbNumber); err != nil {
+		return false, err
+	}
+	if dbNumber != 0 {
+		return true, nil
+	}
+	return false, nil
+}
+
+// IstablishAndCreateDB istablish a connection to the posgtres database and create the databases.(test database & production database)
+func IstablishAndCreateDB() error {
+	connStr := fmt.Sprintf("postgresql://localhost/postgres?user=%s&password=%s&sslmode=disable", dbUser, dbPassword)
+	db, err := sql.Open("postgres", connStr)
+	defer db.Close()
+	if err != nil {
+		return err
+	}
+	if err := createDBs(db); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (p *Psql) DropTestTables() error {
 	script := `
 		DROP TABLE IF EXISTS passwords;
 		DROP TABLE IF EXISTS users;
+		DROP TABLE IF EXISTS sessions;
 	`
 	_, err := p.Db.Exec(script)
 	if err != nil {
@@ -115,8 +118,7 @@ func (p *Psql) CreateTables() error {
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(255) NOT NULL UNIQUE,
 			password VARCHAR(100) NOT NULL,
-			email VARCHAR(255) NOT NULL UNIQUE,
-			session_token text []
+			email VARCHAR(255) NOT NULL UNIQUE
 		);
 
 		CREATE TABLE IF NOT EXISTS passwords(
@@ -127,6 +129,11 @@ func (p *Psql) CreateTables() error {
 			userid INTEGER,
 			FOREIGN KEY(userid) REFERENCES users(id)
 		);
+
+		CREATE TABLE IF NOT EXISTS sessions(
+			user_id INTEGER PRIMARY KEY NOT NULL,
+			session_token VARCHAR
+		);
 	`
 	_, err := p.Db.Exec(tables)
 	if err != nil {
@@ -135,10 +142,10 @@ func (p *Psql) CreateTables() error {
 	return nil
 }
 
-func checkUserDuplicated(user, email string, Db *sql.DB) (bool, error) {
+func checkUserDuplicated(user, email string, Db *sql.DB) (userExist bool, emailExist bool, err error) {
 	rows, err := Db.Query(`SELECT username, email FROM users`)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer rows.Close()
 	var (
@@ -148,13 +155,16 @@ func checkUserDuplicated(user, email string, Db *sql.DB) (bool, error) {
 	for rows.Next() {
 		err = rows.Scan(&username, &emailA)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
-		if username == user || emailA == email {
-			return true, nil
+		if username == user {
+			userExist = true
+		}
+		if emailA == email {
+			emailExist = true
 		}
 	}
-	return false, nil
+	return
 }
 
 func checkUserAndPw(user, pw string, db *sql.DB) (bool, error) {
@@ -188,11 +198,11 @@ func (p *Psql) StoreUsers(user, passw, email string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	isExist, err := checkUserDuplicated(user, email, p.Db)
+	isUserExist, isEmailExist, err := checkUserDuplicated(user, email, p.Db)
 	if err != nil {
 		return false, err
 	}
-	if !isExist {
+	if !isUserExist && !isEmailExist {
 		query := `INSERT INTO users (username, password, email) VALUES ($1,$2,$3);`
 		stmt, err := p.Db.Prepare(query)
 		if err != nil {
@@ -225,38 +235,87 @@ func (p *Psql) GetUsers(user, password string) (bool, error) {
 	return false, nil
 }
 
-func getSessionToken(username string, db *sql.DB) (sessionToken []string, err error) {
-	if err = db.QueryRow(`SELECT session_token FROM users WHERE username=$1`, username).Scan(pq.Array(&sessionToken)); err != nil {
-		return sessionToken, err
+// StoreSessionToken Checks if we already have user sessions then revoke them if they exist and create new one.
+func (p *Psql) StoreSessionToken(userID int, sessionToken string) (created bool, err error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	// Check if we already have a session token in sessions table
+	// maybe we need to allow for one session for the user at the moment.
+	sessionTokenNumber, err := getSessionToken(userID, p.Db)
+	if err != nil {
+		return false, err
+	}
+	if sessionTokenNumber == 1 {
+		return false, fmt.Errorf("Session Already Exist")
+	} else {
+		isCreated, err := createNewSession(userID, sessionToken, p.Db)
+		if err != nil {
+			return false, err
+		}
+		created = isCreated
 	}
 	return
 }
 
-func (p *Psql) StoreSessionToken(user, sessionToken string) (bool, error) {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-	sessionTokens, err := getSessionToken(user, p.Db)
+//
+// Aux Function for StoreSessionToken
+func getSessionToken(userID int, db *sql.DB) (sessionTokensNumber int, err error) {
+	if err = db.QueryRow(`SELECT COUNT(session_token) FROM sessions WHERE user_id=$1`,
+		userID).Scan(&sessionTokensNumber); err != nil {
+		return sessionTokensNumber, fmt.Errorf("Cannot get the number of user tokens")
+	}
+	fmt.Println(sessionTokensNumber)
+	return
+}
+
+func revokeSession(userID int, db *sql.DB) (bool, error) {
+	tag, err := db.Exec(`DELETE FROM sessions WHERE user_id=$1`, userID)
+	if err != nil {
+		return false, fmt.Errorf("Cannot revoke session token")
+	}
+	rowAff, err := tag.RowsAffected()
 	if err != nil {
 		return false, err
 	}
-	sessionTokens = append(sessionTokens, sessionToken)
-	var query string
-
-	if len(sessionTokens) == 0 {
-		query = `INSERT INTO users (session_token) VALUES($1) WHERE username=$2;`
-		_, err = p.Db.Exec(query, pq.Array(sessionTokens), user)
-		if err != nil {
-			return false, err
-		}
-		return true, nil
-	} else {
-		query = `UPDATE users SET session_token=array_append(session_token,$1) WHERE username=$2;`
-		_, err = p.Db.Exec(query, sessionToken, user)
-		if err != nil {
-			return false, err
-		}
-		return true, nil
+	if rowAff != 1 {
+		return false, fmt.Errorf("Cannot revoke sessions token")
 	}
+	return true, nil
+}
+
+func createNewSession(userID int, sessionToken string, db *sql.DB) (bool, error) {
+	rows, err := db.Exec(`INSERT INTO sessions (user_id,session_token) 
+		VALUES ($1,$2)`, userID, sessionToken)
+	if err != nil {
+		return false, fmt.Errorf("Cannot Insert New session token")
+	}
+	rowAffected, err := rows.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rowAffected != 1 {
+		return false, fmt.Errorf("Cannot Create New Session for the user")
+	}
+	return true, nil
+}
+
+//
+//
+
+// GetUserID get user id by providing username.
+func (p *Psql) GetUserID(username string) (userID int, err error) {
+	err = p.Db.QueryRow(`select id from users where username=$1`, username).Scan(&userID)
+	return
+}
+
+func (p *Psql) LogoutUser(userID int) (ok bool, err error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	ok, err = revokeSession(userID, p.Db)
+	if err != nil {
+		return false, err
+	}
+	return
 }
 
 // UpdateUsers update user password.
@@ -265,3 +324,26 @@ func (p *Psql) UpdateUsers(username, password string) {
 	//			then get the update it password with the new one
 	// 			after hashing it of course.
 }
+
+//	sessionTokens, err := getSessionToken(user, p.Db)
+//	if err != nil {
+//		return false, err
+//	}
+//	sessionTokens = append(sessionTokens, sessionToken)
+//	var query string
+//
+//	if len(sessionTokens) == 0 {
+//		query = `INSERT INTO users (session_token) VALUES($1) WHERE username=$2;`
+//		_, err = p.Db.Exec(query, pq.Array(sessionTokens), user)
+//		if err != nil {
+//			return false, err
+//		}
+//		return true, nil
+//	} else {
+//		query = `UPDATE users SET session_token=array_append(session_token,$1) WHERE username=$2;`
+//		_, err = p.Db.Exec(query, sessionToken, user)
+//		if err != nil {
+//			return false, err
+//		}
+//		return true, nil
+//	}

@@ -39,6 +39,36 @@ func NewLogin(username, password string, w http.ResponseWriter) Login {
 	return login
 }
 
+type Logout struct {
+	Username string
+	w        http.ResponseWriter
+}
+
+func NewLogout(username string, w http.ResponseWriter) Logout {
+	l := &Logout{username, w}
+	return *l
+}
+
+func (o Logout) StopUser() (bool, error) {
+	pq, err := psql.NewDb()
+	if err != nil {
+		return false, err
+	}
+	userID, err := pq.GetUserID(o.Username)
+	if err != nil {
+		return false, err
+	}
+	ok, err := pq.LogoutUser(userID)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		clearSession(o.w)
+		return true, nil
+	}
+	return false, nil
+}
+
 // StartUserSession UserLogin's method check for username and password
 // in the Database and if they exist we set the cookie token and also
 // we store it into the Db.
@@ -59,7 +89,11 @@ func (l *UserLogin) StartUserSession() (bool, error) {
 				return false, err
 			}
 			//need to set & store the token.
-			isStored, err := pq.StoreSessionToken(l.username, s.cookieToken)
+			userid, err := pq.GetUserID(l.username)
+			if err != nil {
+				return false, err
+			}
+			isStored, err := pq.StoreSessionToken(userid, s.cookieToken)
 			if err != nil {
 				return false, err
 			}
