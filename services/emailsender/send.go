@@ -7,12 +7,12 @@ import (
 
 //EmailInfo struct holds email info
 type EmailInfo struct {
-	from       string
 	msg        []byte
 	recipients []string
 }
 
 var (
+	FROM      string = "pwm.noreply"
 	password  string = os.Getenv("MAILPW")
 	emailaddr string = os.Getenv("MAILADDR")
 	hostname  string = "smtp.gmail.com"
@@ -20,17 +20,19 @@ var (
 )
 
 //EmailAuth email authentication
-func EmailAuth() smtp.Auth {
+func emailAuth() smtp.Auth {
 	auth := smtp.PlainAuth("", emailaddr, password, hostname)
 	return auth
 }
 
+func NewEmail(msg, email string) *EmailInfo {
+	return &EmailInfo{[]byte(msg), []string{email}}
+}
+
 //SendCode sending code that we generate to the user
-func SendCode(msg, email string) (bool, error) {
-	info := &EmailInfo{}
-	info.from, info.msg, info.recipients = "pwm.noreply", []byte(msg), []string{email}
-	auth := EmailAuth()
-	err := smtp.SendMail(hostname+port, auth, info.from, info.recipients, info.msg)
+func (send *EmailInfo) SendCode() (bool, error) {
+	auth := emailAuth()
+	err := smtp.SendMail(hostname+port, auth, FROM, send.recipients, send.msg)
 	if err != nil {
 		return false, err
 	}
