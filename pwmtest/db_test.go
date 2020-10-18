@@ -1,7 +1,6 @@
 package pwmtest
 
 import (
-	"os"
 	"testing"
 
 	"github.com/TaKeO90/pwm/psql"
@@ -13,7 +12,7 @@ func TestCreateTables(t *testing.T) {
 		t.Fail()
 		t.Log(err)
 	}
-	if err := os.Setenv("test", "true"); err != nil {
+	if err := setupEnv(); err != nil {
 		t.Fail()
 		t.Log(err)
 	}
