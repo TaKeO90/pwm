@@ -26,8 +26,12 @@ func main() {
 	r.Options("/login", handler.ReqHandler)
 	r.Options("/show", handler.ReqHandler)
 	r.Post("/show", handler.ReqHandler)
+	//
 	r.Options("/forgot", handler.ReqHandler)
 	r.Post("/forgot", handler.ReqHandler)
+	r.Options("/recover", handler.ReqHandler)
+	r.Options("/recover", handler.ReqHandler)
+	//
 	r.Options("/creds", handler.ReqHandler)
 	r.Post("/creds", handler.ReqHandler)
 	r.Options("/logout", handler.ReqHandler)

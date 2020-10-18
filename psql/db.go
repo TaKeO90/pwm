@@ -319,31 +319,41 @@ func (p *Psql) LogoutUser(userID int) (ok bool, err error) {
 }
 
 // UpdateUsers update user password.
-func (p *Psql) UpdateUsers(username, password string) {
-	//TODO: .... Check if the user exist first
-	//			then get the update it password with the new one
-	// 			after hashing it of course.
+func (p *Psql) UpdateUsers(email, password string) (bool, error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	pwHashed, err := pwhasher.NewHash(password).Phash()
+	if err != nil {
+		return false, err
+	}
+	cmdTag, err := p.Db.Exec(`UPDATE users SET password=$1 WHERE email=$2`,
+		pwHashed, email)
+	if err != nil {
+		return false, err
+	}
+	if isUpdated, err := cmdTag.RowsAffected(); err != nil {
+		return false, err
+	} else if isUpdated == 1 {
+		return true, nil
+	}
+	return false, nil
 }
 
-//	sessionTokens, err := getSessionToken(user, p.Db)
-//	if err != nil {
-//		return false, err
-//	}
-//	sessionTokens = append(sessionTokens, sessionToken)
-//	var query string
-//
-//	if len(sessionTokens) == 0 {
-//		query = `INSERT INTO users (session_token) VALUES($1) WHERE username=$2;`
-//		_, err = p.Db.Exec(query, pq.Array(sessionTokens), user)
-//		if err != nil {
-//			return false, err
-//		}
-//		return true, nil
-//	} else {
-//		query = `UPDATE users SET session_token=array_append(session_token,$1) WHERE username=$2;`
-//		_, err = p.Db.Exec(query, sessionToken, user)
-//		if err != nil {
-//			return false, err
-//		}
-//		return true, nil
-//	}
+func (p *Psql) CheckEmailExist(email string) (ok bool, err error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	var uMail string
+	err = p.Db.QueryRow(
+		`SELECT email FROM users WHERE email=$1`,
+		email).Scan(&uMail)
+	if err != nil && err.Error() == sql.ErrNoRows.Error() {
+		err = fmt.Errorf("notExist")
+		return
+	} else if err != nil {
+		return
+	}
+	if uMail != "" {
+		ok = true
+	}
+	return
+}

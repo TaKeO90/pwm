@@ -6,6 +6,7 @@ import (
 	"github.com/TaKeO90/pwm/psql"
 )
 
+////////
 // Login interface implement the StartUserSession method of UserLogin.
 type Login interface {
 	StartUserSession() (bool, error)
@@ -19,54 +20,12 @@ type UserLogin struct {
 	w        http.ResponseWriter
 }
 
-// Register interface implement UserRegister.
-type Register interface {
-	CreateNewUser() (bool, error)
-}
-
-// UserRegister structure has element that we need to register a user.
-type UserRegister struct {
-	username string
-	password string
-	email    string
-}
-
 // NewLogin function returns the interface Login
 func NewLogin(username, password string, w http.ResponseWriter) Login {
 	var login Login
 	ul := &UserLogin{username, password, w}
 	login = ul
 	return login
-}
-
-type Logout struct {
-	Username string
-	w        http.ResponseWriter
-}
-
-func NewLogout(username string, w http.ResponseWriter) Logout {
-	l := &Logout{username, w}
-	return *l
-}
-
-func (o Logout) StopUser() (bool, error) {
-	pq, err := psql.NewDb()
-	if err != nil {
-		return false, err
-	}
-	userID, err := pq.GetUserID(o.Username)
-	if err != nil {
-		return false, err
-	}
-	ok, err := pq.LogoutUser(userID)
-	if err != nil {
-		return false, err
-	}
-	if ok {
-		clearSession(o.w)
-		return true, nil
-	}
-	return false, nil
 }
 
 // StartUserSession UserLogin's method check for username and password
@@ -105,6 +64,21 @@ func (l *UserLogin) StartUserSession() (bool, error) {
 	return false, nil
 }
 
+///////
+
+///////
+// Register interface implement UserRegister.
+type Register interface {
+	CreateNewUser() (bool, error)
+}
+
+// UserRegister structure has element that we need to register a user.
+type UserRegister struct {
+	username string
+	password string
+	email    string
+}
+
 // NewRegister return Register interface.
 func NewRegister(username, password, email string) Register {
 	var register Register
@@ -126,13 +100,88 @@ func (r *UserRegister) CreateNewUser() (bool, error) {
 	return ok, nil
 }
 
-////UpdatePassword update user password
-//func UpdatePassword(email, password string) bool {
-//	db, err := sql.Open("sqlite3", DB)
-//	if err != nil {
-//		panic(err)
-//	}
-//	defer db.Close()
-//	isUpdated := sqlite.UpdatePw(password, email, db)
-//	return isUpdated
-//}
+///////
+
+//////
+// UpdatePassword
+type UpdatePassword interface {
+	Update() (bool, error)
+}
+
+// UpdateUserPw
+type UpdateUserPw struct {
+	email    string
+	password string
+}
+
+// NewUpdatePw
+func NewUpdatePw(email, password string) UpdatePassword {
+	var update UpdatePassword
+	u := &UpdateUserPw{email, password}
+	update = u
+	return update
+}
+
+// UpdatePw
+func (u *UpdateUserPw) Update() (bool, error) {
+	pq, err := psql.NewDb()
+	if err != nil {
+		return false, err
+	}
+	isUpdated, err := pq.UpdateUsers(u.email, u.password)
+	if err != nil {
+		return false, err
+	}
+	return isUpdated, nil
+}
+
+///////
+
+///////
+// Logout structure holds username of the user to logout the user session
+type Logout struct {
+	Username string
+	w        http.ResponseWriter
+}
+
+// NewLogout Initialize the logout after getting the username.
+func NewLogout(username string, w http.ResponseWriter) Logout {
+	l := &Logout{username, w}
+	return *l
+}
+
+// StopUser revokes user's session
+func (o Logout) StopUser() (bool, error) {
+	pq, err := psql.NewDb()
+	if err != nil {
+		return false, err
+	}
+	userID, err := pq.GetUserID(o.Username)
+	if err != nil {
+		return false, err
+	}
+	ok, err := pq.LogoutUser(userID)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		clearSession(o.w)
+		return true, nil
+	}
+	return false, nil
+}
+
+///////
+
+// CheckEmailVal
+func CheckEmailVal(email string) (bool, error) {
+	pq, err := psql.NewDb()
+	if err != nil {
+		return false, err
+	}
+	valid, err := pq.CheckEmailExist(email)
+	if err != nil {
+		return false, err
+	}
+	return valid, nil
+}

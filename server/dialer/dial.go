@@ -7,23 +7,26 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	//"math/rand"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	//"time"
 
 	"github.com/TaKeO90/pwm/authentication"
 	//"github.com/TaKeO90/pwm/identityprovider"
-	//"github.com/TaKeO90/pwm/services/emailsender"
+	"github.com/TaKeO90/pwm/services/emailsender"
 	"github.com/TaKeO90/pwm/services/genpassw"
 	//"github.com/TaKeO90/pwm/services/pwcompare"
+	"github.com/TaKeO90/pwm/services/gentoken"
 	"github.com/TaKeO90/pwm/services/pwsaver"
 	"github.com/TaKeO90/pwm/services/pwshow"
 	"github.com/TaKeO90/pwm/services/readcredfile"
 )
+
+// VerificationCodeLength the length of the verification code that we usally send via email for password recovery.
+const VerificationCodeLength int = 8
 
 // User Struct
 type User struct {
@@ -88,11 +91,6 @@ type LogoutReq struct {
 //Logout holds a bool value to indicate which the user is logged out or not
 type Logout struct {
 	IsLogout bool `json:"IsLogout"`
-}
-
-//Token is the code that we send to the user to restore his password
-type Token struct {
-	Code string
 }
 
 //Password password struct holds a value which is Updated to inform the frontend that the user password is updated
@@ -311,7 +309,113 @@ func ServeShow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var t Token
+type EmailCheck struct {
+	Email string `json:"email"`
+}
+type PwRecover struct {
+	VerificationToken string `json:"token"`
+	NewPassword       string `json:"newpassword"`
+}
+
+type IsEmailValid bool
+
+type IsUpdated bool
+
+//TODO: IN PRODUCTION USE MEMCACHED OR REDIS
+var tokens = map[string]string{}
+
+func ServeEmailCheck(w http.ResponseWriter, r *http.Request) {
+	isTest := os.Getenv("test")
+	var isValid IsEmailValid
+	handleOption(w, r)
+	if r.Body != nil {
+		//
+		var resEmail EmailCheck
+		err := json.NewDecoder(r.Body).Decode(&resEmail)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
+			return
+		}
+		valid, err := authentication.CheckEmailVal(resEmail.Email)
+		if err != nil && err.Error() == "notExist" {
+			isValid = false
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(isValid)
+			return
+		} else if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(InternalServerError{err.Error()})
+			return
+		}
+		//
+		if valid {
+			vc := &gentoken.VerificationCode{
+				Length: VerificationCodeLength,
+				Min:    65,
+				Max:    90,
+			}
+			tokenCode := vc.GetToken()
+			var (
+				err error
+				ok  bool
+			)
+			if isTest == "true" {
+				w.Header().Add("Vertification-Token", tokenCode)
+				ok = true
+			} else {
+				ok, err = emailsender.NewEmail(tokenCode, resEmail.Email).SendCode()
+			}
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(InternalServerError{err.Error()})
+			}
+			if ok {
+				tokens[tokenCode] = resEmail.Email
+				isValid = true
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(isValid)
+				return
+			}
+		}
+		//
+	}
+}
+
+func ServePwRecover(w http.ResponseWriter, r *http.Request) {
+	request := &PwRecover{}
+	if r.Body != nil {
+		err := json.NewDecoder(r.Body).Decode(request)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
+			return
+		}
+		userEmail := tokens[request.VerificationToken]
+		updatePw := authentication.NewUpdatePw(userEmail, request.NewPassword)
+		isUpdated, err := updatePw.Update()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
+			return
+		}
+		if isUpdated {
+			delete(tokens, request.VerificationToken)
+			var updated IsUpdated = true
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(&updated)
+			return
+		} else {
+			var updated IsUpdated = false
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(&updated)
+			return
+		}
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+}
 
 //ServepwForget function that handles password recovery process
 //func ServepwForget(w http.ResponseWriter, r *http.Request) {

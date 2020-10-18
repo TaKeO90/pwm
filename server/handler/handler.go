@@ -22,7 +22,9 @@ func ReqHandler(w http.ResponseWriter, r *http.Request) {
 	case "show":
 		dialer.ServeShow(w, r)
 	case "forgot":
-		//dialer.ServepwForget(w, r)
+		dialer.ServeEmailCheck(w, r)
+	case "recover":
+		dialer.ServePwRecover(w, r)
 	case "creds":
 		//dialer.ServeCreds(w, r)
 	case "logout":
