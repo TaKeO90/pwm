@@ -1,5 +1,7 @@
 github.com/TaKeo90/pwm v0.0.0-20200601175707-c12dc61f8999 h1:+oKNgA783Xh2kXyucXmmCwP2ZraOeS0n2dr7aYUAv1c=
 github.com/TaKeo90/pwm v0.0.0-20200601175707-c12dc61f8999/go.mod h1:QU/c8YccaQsoix1DGTPtwQDqciC5JvgWstnvo2T77D0=
+github.com/bradfitz/gomemcache v0.0.0-20190913173617-a41fca850d0b h1:L/QXpzIa3pOvUGt1D1lA5KjYhPBAN/3iWdP7xeFS9F0=
+github.com/bradfitz/gomemcache v0.0.0-20190913173617-a41fca850d0b/go.mod h1:H0wQNHz2YrLsuXOZozoeDmnHXkNCRmMW0gwFWDfEZDA=
 github.com/go-chi/chi v4.1.2+incompatible h1:fGFk2Gmi/YKXk0OmGfBh0WgmN3XB8lVnEyNz34tQRec=
 github.com/go-chi/chi v4.1.2+incompatible/go.mod h1:eB3wogJHnLi3x/kFX2A+IbTBlXxmMeXJVKy9tTv1XzQ=
 github.com/gorilla/securecookie v1.1.1 h1:miw7JPhV+b/lAHSXz4qd/nN9jRiAFV5FwjeKyCS8BvQ=

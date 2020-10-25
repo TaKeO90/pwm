@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/TaKeo90/pwm v0.0.0-20200601175707-c12dc61f8999
+	github.com/bradfitz/gomemcache v0.0.0-20190913173617-a41fca850d0b
 	github.com/go-chi/chi v4.1.2+incompatible
 	github.com/gorilla/securecookie v1.1.1
 	github.com/lib/pq v1.8.0
