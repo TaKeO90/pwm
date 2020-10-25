@@ -18,6 +18,7 @@ import (
 	//"github.com/TaKeO90/pwm/identityprovider"
 	"github.com/TaKeO90/pwm/services/emailsender"
 	"github.com/TaKeO90/pwm/services/genpassw"
+	"github.com/TaKeO90/pwm/services/memtoken"
 	//"github.com/TaKeO90/pwm/services/pwcompare"
 	"github.com/TaKeO90/pwm/services/gentoken"
 	"github.com/TaKeO90/pwm/services/pwsaver"
@@ -321,8 +322,7 @@ type IsEmailValid bool
 
 type IsUpdated bool
 
-//TODO: IN PRODUCTION USE MEMCACHED OR REDIS
-var tokens = map[string]string{}
+var tokens *memtoken.Token = memtoken.New()
 
 func ServeEmailCheck(w http.ResponseWriter, r *http.Request) {
 	isTest := os.Getenv("test")
@@ -330,14 +330,14 @@ func ServeEmailCheck(w http.ResponseWriter, r *http.Request) {
 	handleOption(w, r)
 	if r.Body != nil {
 		//
-		var resEmail EmailCheck
-		err := json.NewDecoder(r.Body).Decode(&resEmail)
+		var reqEmail EmailCheck
+		err := json.NewDecoder(r.Body).Decode(&reqEmail)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
 			return
 		}
-		valid, err := authentication.CheckEmailVal(resEmail.Email)
+		valid, err := authentication.CheckEmailVal(reqEmail.Email)
 		if err != nil && err.Error() == "notExist" {
 			isValid = false
 			w.WriteHeader(http.StatusUnauthorized)
@@ -355,6 +355,7 @@ func ServeEmailCheck(w http.ResponseWriter, r *http.Request) {
 				Min:    65,
 				Max:    90,
 			}
+			// Create New Token
 			tokenCode := vc.GetToken()
 			var (
 				err error
@@ -364,24 +365,33 @@ func ServeEmailCheck(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("Vertification-Token", tokenCode)
 				ok = true
 			} else {
-				ok, err = emailsender.NewEmail(tokenCode, resEmail.Email).SendCode()
+				ok, err = emailsender.NewEmail(tokenCode, reqEmail.Email).SendCode()
 			}
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(InternalServerError{err.Error()})
+				return
 			}
 			if ok {
-				tokens[tokenCode] = resEmail.Email
-				isValid = true
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(isValid)
-				return
+				isStored, err := tokens.StoreToken(tokenCode, reqEmail.Email)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(InternalServerError{err.Error()})
+					return
+				}
+				if isStored {
+					isValid = true
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(isValid)
+					return
+				}
 			}
 		}
 		//
 	}
 }
 
+// ServePwRecover
 func ServePwRecover(w http.ResponseWriter, r *http.Request) {
 	request := &PwRecover{}
 	if r.Body != nil {
@@ -391,7 +401,12 @@ func ServePwRecover(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
 			return
 		}
-		userEmail := tokens[request.VerificationToken]
+		userEmail, err := tokens.GetToken(request.VerificationToken)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
+			return
+		}
 		updatePw := authentication.NewUpdatePw(userEmail, request.NewPassword)
 		isUpdated, err := updatePw.Update()
 		if err != nil {
@@ -400,7 +415,12 @@ func ServePwRecover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if isUpdated {
-			delete(tokens, request.VerificationToken)
+			_, err := tokens.Delete(request.VerificationToken)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(&InternalServerError{err.Error()})
+				return
+			}
 			var updated IsUpdated = true
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(&updated)
